@@ -1,7 +1,5 @@
 /** @fileoverview Common functions used by multiple parts of the build process */
 
-import { AxiosError, type AxiosResponse } from "axios";
-
 import type { WcagItem } from "./guidelines";
 
 /** Generates an ID for heading permalinks. Equivalent to wcag:generate-id in base.xslt. */
@@ -17,10 +15,7 @@ export function generateId(title: string) {
 export const resolveDecimalVersion = (version: `${number}`) => version.split("").join(".");
 
 /** Sort function for ordering WCAG principle/guideline/SC numbers ascending */
-export function wcagSort(
-  a: WcagItem,
-  b: WcagItem
-) {
+export function wcagSort(a: WcagItem, b: WcagItem) {
   const aParts = a.num.split(".").map((n) => +n);
   const bParts = b.num.split(".").map((n) => +n);
 
@@ -31,22 +26,34 @@ export function wcagSort(
   return 0;
 }
 
-/**
- * Handles HTTP error responses from Axios requests in local dev;
- * re-throws error during builds to fail loudly.
- * This should only be used for non-critical requests that can tolerate null data
- * without major side effects.
- */
-export const wrapAxiosRequest = <T, D>(promise: Promise<AxiosResponse<T, D>>) =>
-  promise.catch((error) => {
-    if (!(error instanceof AxiosError) || !error.response || !error.request) throw error;
-    const { response, request } = error;
-    console.warn(
-      `AxiosError: status ${response.status} received from ${
-        request.protocol + "//" + request.host
-      }${request.path || ""}`
-    );
+async function fetchAndExpect2xx(url: string | URL, init?: RequestInit) {
+  const response = await fetch(url, init);
+  if (response.status >= 400) throw new Error(`Status ${response.status} received from ${url}`);
+  return response;
+}
 
-    if (process.env.ELEVENTY_RUN_MODE === "build") throw error;
-    else return { data: null };
-  });
+export const fetchText = async (url: string | URL, init?: RequestInit) =>
+  fetchAndExpect2xx(url, init).then((response) => response.text());
+
+interface FetchJsonOptions {
+  defaultResponse?: any;
+}
+
+export const fetchJson = async (
+  url: string | URL,
+  init?: RequestInit,
+  options: FetchJsonOptions = {}
+) => {
+  function handleError(message: string) {
+    if (process.env.ELEVENTY_RUN_MODE !== "build" && "defaultResponse" in options) {
+      console.warn(`Fetch error: ${message}`);
+      return options.defaultResponse;
+    } else throw new Error(message);
+  }
+
+  try {
+    return (await fetchAndExpect2xx(url, init)).json();
+  } catch (error) {
+    return handleError(error.message);
+  }
+};
